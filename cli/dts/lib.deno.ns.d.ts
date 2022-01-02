@@ -2882,4 +2882,26 @@ declare namespace Deno {
     recordType: RecordType,
     options?: ResolveDnsOptions,
   ): Promise<string[] | MXRecord[] | SRVRecord[] | string[][]>;
+
+  /**
+   * Performs reverse DNS resolution using an IPv4 or IPv6 address, returning an array of names.
+   * Fails in the cases such as:
+   * - the query is in invalid ip
+   * - the options have an invalid parameter, e.g. `nameServer.port` is beyond the range of 16-bit unsigned integer
+   * - timed out
+   *
+   * ```ts
+   * const names = await Deno.reverseDns("8.8.8.8");
+   *
+   * const names2 = await Deno.reverseDns("8.8.4.4", {
+   *   nameServer: { ipAddr: "8.8.8.8", port: 53 },
+   * });
+   * ```
+   *
+   * Requires `allow-net` permission.
+   */
+   export function reverseDns(
+    query: string,
+    options?: ResolveDnsOptions,
+  ): Promise<string[]>;
 }

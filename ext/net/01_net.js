@@ -58,6 +58,10 @@
     return core.opAsync("op_dns_resolve", { query, recordType, options });
   }
 
+  function reverseDns(query, options) {
+    return core.opAsync("op_dns_reverse", { query, options });
+  }
+
   class Conn {
     #rid = 0;
     #remoteAddr = null;
@@ -236,5 +240,6 @@
     shutdown,
     Datagram,
     resolveDns,
+    reverseDns,
   };
 })(this);

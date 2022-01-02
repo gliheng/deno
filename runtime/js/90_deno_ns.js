@@ -105,6 +105,7 @@
     PermissionStatus: __bootstrap.permissions.PermissionStatus,
     serveHttp: __bootstrap.http.serveHttp,
     resolveDns: __bootstrap.net.resolveDns,
+    reverseDns: __bootstrap.net.reverseDns,
     upgradeWebSocket: __bootstrap.http.upgradeWebSocket,
     kill: __bootstrap.process.kill,
   };

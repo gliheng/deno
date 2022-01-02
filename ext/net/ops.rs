@@ -39,6 +39,7 @@ use trust_dns_resolver::config::ResolverOpts;
 use trust_dns_resolver::error::ResolveErrorKind;
 use trust_dns_resolver::system_conf;
 use trust_dns_resolver::AsyncResolver;
+use trust_dns_resolver::TokioAsyncResolver;
 
 #[cfg(unix)]
 use super::ops_unix as net_unix;
@@ -55,6 +56,7 @@ pub fn init<P: NetPermissions + 'static>() -> Vec<OpPair> {
     ("op_dgram_recv", op_async(op_dgram_recv)),
     ("op_dgram_send", op_async(op_dgram_send::<P>)),
     ("op_dns_resolve", op_async(op_dns_resolve::<P>)),
+    ("op_dns_reverse", op_async(op_dns_reverse::<P>)),
   ]
 }
 
@@ -581,6 +583,13 @@ pub struct ResolveAddrArgs {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReverseAddrArgs {
+  query: String,
+  options: Option<ResolveDnsOption>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResolveDnsOption {
   name_server: Option<NameServer>,
 }
@@ -597,20 +606,10 @@ pub struct NameServer {
   port: u16,
 }
 
-pub async fn op_dns_resolve<NP>(
-  state: Rc<RefCell<OpState>>,
-  args: ResolveAddrArgs,
-  _: (),
-) -> Result<Vec<DnsReturnRecord>, AnyError>
+fn create_resolver<NP>(options: Option<ResolveDnsOption>, state: Rc<RefCell<OpState>>) -> Result<TokioAsyncResolver, AnyError>
 where
   NP: NetPermissions + 'static,
 {
-  let ResolveAddrArgs {
-    query,
-    record_type,
-    options,
-  } = args;
-
   let (config, opts) = if let Some(name_server) =
     options.as_ref().and_then(|o| o.name_server.as_ref())
   {
@@ -640,7 +639,24 @@ where
     }
   }
 
-  let resolver = AsyncResolver::tokio(config, opts)?;
+  Ok(AsyncResolver::tokio(config, opts)?)
+}
+
+pub async fn op_dns_resolve<NP>(
+  state: Rc<RefCell<OpState>>,
+  args: ResolveAddrArgs,
+  _: (),
+) -> Result<Vec<DnsReturnRecord>, AnyError>
+where
+  NP: NetPermissions + 'static,
+{
+  let ResolveAddrArgs {
+    query,
+    record_type,
+    options,
+  } = args;
+
+  let resolver = create_resolver::<NP>(options, state)?;
 
   let results = resolver
     .lookup(query, record_type, Default::default())
@@ -660,6 +676,52 @@ where
     })?
     .iter()
     .filter_map(rdata_to_return_record(record_type))
+    .collect();
+
+  Ok(results)
+}
+
+pub async fn op_dns_reverse<NP>(
+  state: Rc<RefCell<OpState>>,
+  args: ReverseAddrArgs,
+  _: (),
+) -> Result<Vec<String>, AnyError>
+where
+  NP: NetPermissions + 'static,
+{
+  let ReverseAddrArgs {
+    query,
+    options,
+  } = args;
+
+  let resolver = create_resolver::<NP>(options, state)?;
+  let ip = query.parse().map_err(|_| type_error("Wrong ip format!"))?;
+  let results = resolver
+    .reverse_lookup(ip)
+    .await
+    .map_err(|e| {
+      // TODO
+      let message = format!("{}", e);
+      match e.kind() {
+        ResolveErrorKind::NoRecordsFound { .. } => {
+          custom_error("NotFound", message)
+        }
+        ResolveErrorKind::Message("No connections available") => {
+          custom_error("NotConnected", message)
+        }
+        ResolveErrorKind::Timeout => custom_error("TimedOut", message),
+        _ => generic_error(message),
+      }
+    })?
+    .iter()
+    .map(|e| {
+      let mut name = e.to_utf8();
+      // full quolified domain needs stripping ending . char
+      if name.ends_with(".") {
+        name.pop();
+      }
+      name
+    })
     .collect();
 
   Ok(results)
